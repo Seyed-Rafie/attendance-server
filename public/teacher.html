@@ -1,0 +1,249 @@
+<!DOCTYPE html>
+<html lang="fa" dir="rtl">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>پنل استاد</title>
+  <script src="https://cdn.jsdelivr.net/npm/qrcode@1.5.3/build/qrcode.min.js"></script>
+  <style>
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body {
+      font-family: -apple-system, 'Segoe UI', Tahoma, sans-serif;
+      background: #f5f7fa; min-height: 100vh; padding: 16px;
+    }
+    .container { max-width: 500px; margin: 0 auto; }
+    .card {
+      background: white; border-radius: 16px; padding: 20px;
+      margin-bottom: 14px; box-shadow: 0 2px 12px rgba(0,0,0,0.06);
+    }
+    h1 { color: #1F4E79; font-size: 20px; margin-bottom: 16px; text-align: center; }
+    h2 { color: #1F4E79; font-size: 16px; margin-bottom: 12px; }
+    label { display: block; font-size: 14px; color: #555; margin-bottom: 6px; }
+    input, select {
+      width: 100%; padding: 14px; font-size: 16px;
+      border: 2px solid #e0e6ed; border-radius: 10px;
+      margin-bottom: 12px; outline: none;
+      font-family: inherit;
+    }
+    input:focus, select:focus { border-color: #1F4E79; }
+    .btn {
+      width: 100%; padding: 16px; font-size: 17px;
+      border: none; border-radius: 10px; font-weight: bold;
+      cursor: pointer; transition: opacity 0.2s; font-family: inherit;
+    }
+    .btn:disabled { opacity: 0.5; }
+    .btn-primary { background: #1F4E79; color: white; }
+    .btn-danger { background: #c0392b; color: white; }
+    .hidden { display: none !important; }
+    #qrBox {
+      background: white; padding: 16px; border-radius: 12px;
+      text-align: center; margin: 16px 0;
+    }
+    #qrBox canvas { max-width: 100%; height: auto; }
+    #qrTimer {
+      text-align: center; font-size: 13px; color: #666;
+      margin-top: 8px;
+    }
+    .present-list {
+      list-style: none; max-height: 260px; overflow-y: auto;
+    }
+    .present-list li {
+      padding: 10px 12px; border-bottom: 1px solid #eee;
+      display: flex; justify-content: space-between; align-items: center;
+      font-size: 15px;
+    }
+    .present-list li:last-child { border-bottom: none; }
+    .badge {
+      background: #d4edda; color: #155724; padding: 3px 10px;
+      border-radius: 20px; font-size: 12px; font-weight: bold;
+    }
+    .count { font-size: 32px; font-weight: bold; color: #00875a; text-align: center; }
+    .count-label { text-align: center; color: #666; font-size: 13px; }
+    .status { text-align: center; font-size: 14px; margin-top: 10px; padding: 10px; border-radius: 8px; }
+    .status-active { background: #d4edda; color: #155724; }
+    .status-error { background: #f8d7da; color: #721c24; }
+  </style>
+</head>
+<body>
+  <div class="container">
+
+    <!-- حالت ۱: ورود -->
+    <div id="loginView" class="card">
+      <h1>👨‍🏫 پنل استاد</h1>
+      <label>توکن استاد</label>
+      <input type="text" id="tokenInput" placeholder="T_..." dir="ltr">
+      <label>درس</label>
+      <select id="courseSelect">
+        <option value="c1">ریاضی ۱</option>
+      </select>
+      <button class="btn btn-primary" onclick="login()">ورود</button>
+      <div id="loginError" class="status status-error hidden"></div>
+    </div>
+
+    <!-- حالت ۲: داشبورد -->
+    <div id="dashboardView" class="hidden">
+      <div class="card">
+        <h1>شروع کلاس</h1>
+        <button class="btn btn-primary" id="startBtn" onclick="startSession()">
+          ▶️ شروع حضور و غیاب
+        </button>
+      </div>
+
+      <div id="sessionCard" class="card hidden">
+        <h2>QR حضور</h2>
+        <div id="qrBox"></div>
+        <div id="qrTimer">در حال بارگذاری...</div>
+      </div>
+
+      <div id="presentCard" class="card hidden">
+        <h2>حاضرین</h2>
+        <div class="count" id="presentCount">0</div>
+        <div class="count-label">نفر حاضر شده‌اند</div>
+        <ul class="present-list" id="presentList"></ul>
+      </div>
+
+      <div id="sessionCard2" class="card hidden">
+        <button class="btn btn-danger" onclick="closeSession()">⏹️ پایان کلاس</button>
+      </div>
+    </div>
+
+  </div>
+
+<script>
+const $ = id => document.getElementById(id);
+let currentSession = null;
+let qrInterval = null;
+let pollInterval = null;
+let countdownTimer = null;
+
+function showError(msg) {
+  const el = $('loginError');
+  el.textContent = msg;
+  el.classList.remove('hidden');
+  setTimeout(() => el.classList.add('hidden'), 4000);
+}
+
+function login() {
+  const token = $('tokenInput').value.trim();
+  if (!token) return showError('توکن را وارد کن');
+  localStorage.setItem('teacherToken', token);
+  $('loginView').classList.add('hidden');
+  $('dashboardView').classList.remove('hidden');
+}
+
+async function startSession() {
+  const token = localStorage.getItem('teacherToken');
+  const courseId = $('courseSelect').value;
+  $('startBtn').disabled = true;
+
+  try {
+    const res = await fetch('/api/session/start', {
+      method: 'POST',
+      headers: {
+        'Authorization': 'Bearer ' + token,
+        'Content-Type': 'application/json'
+      },
+      body: JSON.stringify({ course_id: courseId })
+    });
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.error || 'خطا');
+
+    currentSession = data.session_id;
+    $('sessionCard').classList.remove('hidden');
+    $('presentCard').classList.remove('hidden');
+    $('sessionCard2').classList.remove('hidden');
+
+    await refreshQR();
+    qrInterval = setInterval(refreshQR, (data.step_seconds || 10) * 1000);
+    pollInterval = setInterval(pollReport, 3000);
+    pollReport();
+  } catch (e) {
+    alert('خطا: ' + e.message);
+    $('startBtn').disabled = false;
+  }
+}
+
+async function refreshQR() {
+  if (!currentSession) return;
+  const token = localStorage.getItem('teacherToken');
+  try {
+    const res = await fetch(`/api/session/${currentSession}/qr`, {
+      headers: { 'Authorization': 'Bearer ' + token }
+    });
+    const qr = await res.json();
+    if (!res.ok) throw new Error(qr.error);
+
+    // رندر QR
+    const canvas = document.createElement('canvas');
+    await QRCode.toCanvas(canvas, JSON.stringify(qr), {
+      width: 280, margin: 2
+    });
+    $('qrBox').innerHTML = '';
+    $('qrBox').appendChild(canvas);
+
+    // شمارش معکوس
+    clearInterval(countdownTimer);
+    let remaining = Math.max(0, qr.exp - Math.floor(Date.now()/1000));
+    $('qrTimer').textContent = `معتبر برای ${remaining} ثانیه`;
+    countdownTimer = setInterval(() => {
+      remaining--;
+      if (remaining <= 0) {
+        $('qrTimer').textContent = 'در حال تازه‌سازی...';
+        clearInterval(countdownTimer);
+      } else {
+        $('qrTimer').textContent = `معتبر برای ${remaining} ثانیه`;
+      }
+    }, 1000);
+  } catch (e) {
+    $('qrTimer').textContent = 'خطا: ' + e.message;
+  }
+}
+
+async function pollReport() {
+  if (!currentSession) return;
+  const token = localStorage.getItem('teacherToken');
+  try {
+    const res = await fetch(`/api/session/${currentSession}/report`, {
+      headers: { 'Authorization': 'Bearer ' + token }
+    });
+    const data = await res.json();
+    if (!res.ok) return;
+
+    $('presentCount').textContent = data.present_count;
+    $('presentList').innerHTML = data.records.map(r => `
+      <li>
+        <span>${r.name}</span>
+        <span class="badge">حاضر</span>
+      </li>
+    `).join('') || '<li style="color:#999;text-align:center;">هنوز کسی اسکن نکرده</li>';
+  } catch (e) {}
+}
+
+async function closeSession() {
+  if (!currentSession) return;
+  if (!confirm('کلاس تموم بشه؟')) return;
+  const token = localStorage.getItem('teacherToken');
+  try {
+    await fetch(`/api/session/${currentSession}/close`, {
+      method: 'POST',
+      headers: { 'Authorization': 'Bearer ' + token }
+    });
+  } catch (e) {}
+  clearInterval(qrInterval);
+  clearInterval(pollInterval);
+  clearInterval(countdownTimer);
+  currentSession = null;
+  $('sessionCard').classList.add('hidden');
+  $('presentCard').classList.add('hidden');
+  $('sessionCard2').classList.add('hidden');
+  $('startBtn').disabled = false;
+}
+
+// auto-login اگر توکن هست
+if (localStorage.getItem('teacherToken')) {
+  $('loginView').classList.add('hidden');
+  $('dashboardView').classList.remove('hidden');
+}
+</script>
+</body>
+</html>

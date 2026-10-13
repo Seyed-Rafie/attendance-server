@@ -159,10 +159,13 @@ function rateLimit(windowMs, max) {
   };
 }
 
+const path = require('path');
+
 const app = express();
 app.set('trust proxy', 1);
 app.use(cors({ origin: CORS_ORIGIN }));
 app.use(express.json({ limit: '16kb' }));
+app.use(express.static(path.join(__dirname, 'public')));
 
 app.get('/health', (_req, res) =>
   res.json({ ok: true, time: now(), db: DB_FILE })
